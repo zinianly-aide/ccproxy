@@ -1,0 +1,17 @@
+{
+  "name": "@lanai/mcp",
+  "version": "0.1.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "lanai-mcp": "bin/lanai-mcp.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@fastify/cors": "^9.0.0",
+    "@lanai/shared": "workspace:*",
+    "fastify": "^4.26.2"
+  }
+}

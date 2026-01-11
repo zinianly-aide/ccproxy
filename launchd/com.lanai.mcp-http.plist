@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.lanai.mcp-http</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/bin/env</string>
+    <string>node</string>
+    <string>__REPO_ROOT__/packages/mcp/dist/httpControl.js</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>__REPO_ROOT__</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>LANAI_API_KEY</key>
+    <string>__LANAI_API_KEY__</string>
+    <key>LAN_ALLOW_CIDRS</key>
+    <string>__LAN_ALLOW_CIDRS__</string>
+    <key>REPO_ROOT</key>
+    <string>__REPO_ROOT__</string>
+    <key>MCP_HTTP_HOST</key>
+    <string>__MCP_HTTP_HOST__</string>
+    <key>MCP_HTTP_PORT</key>
+    <string>__MCP_HTTP_PORT__</string>
+    <key>MCP_HTTP_BASE_URL</key>
+    <string>__MCP_HTTP_BASE_URL__</string>
+    <key>LOG_LEVEL</key>
+    <string>__LOG_LEVEL__</string>
+    <key>PATH</key>
+    <string>__PATH__</string>
+  </dict>
+  <key>StandardOutPath</key>
+  <string>__HOME__/Library/Logs/lanai/mcp-http.log</string>
+  <key>StandardErrorPath</key>
+  <string>__HOME__/Library/Logs/lanai/mcp-http.err.log</string>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
+</dict>
+</plist>

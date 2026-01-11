@@ -1,0 +1,17 @@
+{
+  "name": "lanai",
+  "private": true,
+  "packageManager": "pnpm@9.0.0",
+  "scripts": {
+    "build": "pnpm -r build",
+    "start:proxy": "node packages/proxy/dist/index.js",
+    "start:mcp-http": "node packages/mcp/dist/httpControl.js",
+    "mcp": "node packages/mcp/dist/index.js",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.30",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.5"
+  }
+}

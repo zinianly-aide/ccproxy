@@ -1,0 +1,10 @@
+models:
+  - id: ollama:llama3
+    provider: ollama
+    model: llama3
+  - id: gemini:gemini-pro
+    provider: gemini
+    model: gemini-pro
+  - id: codex:gpt-4o-mini
+    provider: codex
+    model: gpt-4o-mini
