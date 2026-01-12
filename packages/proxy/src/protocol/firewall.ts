@@ -12,12 +12,48 @@ export interface FirewallResult {
   reason?: string;
 }
 
-export function protocolFirewall(req: {
-  url?: string;
-  headers?: Record<string, string | undefined>;
-  body?: { messages?: Array<{ content?: string | unknown }>; system?: string };
-}): FirewallResult {
-  if (isClaudeProtocol(req)) {
+export interface FirewallOptions {
+  strictMode?: boolean;  // If true, reject Claude requests when API key is missing
+  allowedModels?: string[];  // Whitelist of models allowed for Claude protocol
+}
+
+const DEFAULT_OPTIONS: FirewallOptions = {
+  strictMode: process.env.STRICT_CLAUDE === "true",
+  allowedModels: process.env.CLAUDE_ALLOWED_MODELS?.split(",").map(m => m.trim()).filter(Boolean)
+};
+
+/**
+ * Check if a model is allowed to use Claude protocol
+ */
+function isModelAllowed(modelId: string, allowedModels?: string[]): boolean {
+  if (!allowedModels || allowedModels.length === 0) {
+    return true;  // No restrictions if whitelist is empty
+  }
+  return allowedModels.includes(modelId);
+}
+
+export function protocolFirewall(
+  req: {
+    url?: string;
+    headers?: Record<string, string | undefined>;
+    body?: { messages?: Array<{ content?: string | unknown }>; system?: string; model?: string };
+  },
+  options: FirewallOptions = DEFAULT_OPTIONS
+): FirewallResult {
+  const isClaude = isClaudeProtocol(req);
+
+  if (isClaude) {
+    // Check model whitelist (only if whitelist is configured)
+    if (options.allowedModels && options.allowedModels.length > 0) {
+      const modelId = req.body?.model;
+      if (!isModelAllowed(modelId || "", options.allowedModels)) {
+        return {
+          forceProvider: null,  // Don't force, let it fail with model not found
+          reason: `Model '${modelId}' not in Claude protocol whitelist`,
+        };
+      }
+    }
+
     // Detect specific reason for logging
     let reason = "Claude protocol detected";
 
@@ -38,4 +74,21 @@ export function protocolFirewall(req: {
   return {
     forceProvider: null,
   };
+}
+
+/**
+ * Get firewall options for a request with Anthropic API validation
+ */
+export function getFirewallOptionsWithApiKey(
+  hasApiKey: boolean,
+  customOptions?: Partial<FirewallOptions>
+): FirewallOptions {
+  const options: FirewallOptions = {
+    ...DEFAULT_OPTIONS,
+    ...customOptions
+  };
+
+  // In strict mode, we validate the API key presence externally
+  // The caller should check hasApiKey before proceeding
+  return options;
 }

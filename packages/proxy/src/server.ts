@@ -33,6 +33,7 @@ import {
   handleAnthropicStream
 } from "./providers/anthropic";
 import { protocolFirewall } from "./protocol/firewall";
+import { sanitizeMessages } from "./protocol/messageSanitizer";
 import { randomUUID } from "node:crypto";
 
 function errorPayload(message: string, type = "invalid_request_error", code = "bad_request") {
@@ -258,6 +259,9 @@ export function buildServer(config: AppConfig): FastifyInstance {
     }
 
     // 🔒 PROTOCOL FIREWALL: Check if this is a Claude protocol request
+    const hasAnthropicKey = !!config.providers.anthropic.apiKey;
+    const strictMode = process.env.STRICT_CLAUDE === "true";
+
     const firewallResult = protocolFirewall({
       url: req.url,
       headers: req.headers as Record<string, string | undefined>,
@@ -269,63 +273,77 @@ export function buildServer(config: AppConfig): FastifyInstance {
       url: req.url,
       forcedProvider: firewallResult.forceProvider,
       reason: firewallResult.reason,
-      model: body.model
+      model: body.model,
+      strictMode,
+      hasAnthropicKey
     }, "Protocol firewall check");
+
+    // STRICT MODE: If Claude protocol detected but no API key, reject immediately
+    if (strictMode && firewallResult.forceProvider === "anthropic" && !hasAnthropicKey) {
+      logger.error({
+        requestId,
+        reason: firewallResult.reason
+      }, "STRICT MODE: Claude protocol detected but Anthropic API not configured");
+      reply.code(503).send(createClaudeErrorResponse(
+        "Claude protocol requests require Anthropic API configuration. " +
+        "Please set ANTHROPIC_API_KEY or disable STRICT_CLAUDE mode."
+      ));
+      return;
+    }
 
     // If forced to Anthropic, bypass local model routing
     if (firewallResult.forceProvider === "anthropic") {
-      if (!config.providers.anthropic.apiKey) {
-        logger.error({ requestId }, "Anthropic API key not configured");
-        reply.code(500).send(createClaudeErrorResponse("Anthropic API not configured"));
-        return;
-      }
+      if (!hasAnthropicKey) {
+        logger.warn({ requestId }, "Anthropic API key not configured, attempting local routing");
+        // Fall through to local model routing (non-strict mode behavior)
+      } else {
+        logger.info({
+          requestId,
+          reason: firewallResult.reason
+        }, "Forcing route to Anthropic API");
 
-      logger.info({
-        requestId,
-        reason: firewallResult.reason
-      }, "Forcing route to Anthropic API");
-
-      try {
-        const anthropicReq = {
-          model: body.model,
-          max_tokens: body.max_tokens,
-          messages: body.messages,
-          system: body.system,
-          temperature: body.temperature,
-          stream: body.stream || false
-        };
-
-        if (body.stream) {
-          reply.raw.setHeader("Content-Type", "text/event-stream");
-          reply.raw.setHeader("Cache-Control", "no-cache");
-          reply.raw.setHeader("Connection", "keep-alive");
-          reply.raw.setHeader("X-Accel-Buffering", "no");
-          reply.hijack();
-
-          const writeSSE = (chunk: string) => {
-            reply.raw.write(chunk);
+        try {
+          const anthropicReq = {
+            model: body.model,
+            max_tokens: body.max_tokens,
+            messages: body.messages,
+            system: body.system,
+            temperature: body.temperature,
+            stream: body.stream || false
           };
 
-          await handleAnthropicStream({
-            req: anthropicReq,
-            config: config.providers.anthropic,
-            writeSSE
-          });
+          if (body.stream) {
+            reply.raw.setHeader("Content-Type", "text/event-stream");
+            reply.raw.setHeader("Cache-Control", "no-cache");
+            reply.raw.setHeader("Connection", "keep-alive");
+            reply.raw.setHeader("X-Accel-Buffering", "no");
+            reply.hijack();
 
-          reply.raw.end();
-          return;
-        } else {
-          const result = await handleAnthropicRequest({
-            req: anthropicReq,
-            config: config.providers.anthropic
-          });
-          reply.send(result);
+            const writeSSE = (chunk: string) => {
+              reply.raw.write(chunk);
+            };
+
+            await handleAnthropicStream({
+              req: anthropicReq,
+              config: config.providers.anthropic,
+              writeSSE
+            });
+
+            reply.raw.end();
+            return;
+          } else {
+            const result = await handleAnthropicRequest({
+              req: anthropicReq,
+              config: config.providers.anthropic
+            });
+            reply.send(result);
+            return;
+          }
+        } catch (err: any) {
+          logger.error({ requestId, err }, "Anthropic request error");
+          reply.code(500).send(createClaudeErrorResponse(err?.message || "Anthropic API error"));
           return;
         }
-      } catch (err: any) {
-        logger.error({ requestId, err }, "Anthropic request error");
-        reply.code(500).send(createClaudeErrorResponse(err?.message || "Anthropic API error"));
-        return;
       }
     }
 
@@ -344,6 +362,19 @@ export function buildServer(config: AppConfig): FastifyInstance {
         contentType: typeof m.content
       }))
     }, "Incoming Claude Messages API request");
+
+    // 🧹 Sanitize messages: Remove incomplete/corrupted messages from history
+    const { messages: sanitizedMessages, result: sanitizationResult } = sanitizeMessages(body.messages);
+    if (sanitizationResult.cleaned) {
+      logger.warn({
+        requestId,
+        originalCount: body.messages.length,
+        sanitizedCount: sanitizedMessages.length,
+        warnings: sanitizationResult.warnings
+      }, "Sanitized incomplete messages from history");
+      // Update body.messages with sanitized version
+      body.messages = sanitizedMessages as any;
+    }
 
     const modelConfig = config.models.find((model) => model.id === body.model);
     if (!modelConfig) {
