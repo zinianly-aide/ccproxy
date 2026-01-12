@@ -28,6 +28,11 @@ import {
   handleCodexChatCompletions,
   handleCodexHttpCompletions
 } from "./providers/codex";
+import {
+  handleAnthropicRequest,
+  handleAnthropicStream
+} from "./providers/anthropic";
+import { protocolFirewall } from "./protocol/firewall";
 import { randomUUID } from "node:crypto";
 
 function errorPayload(message: string, type = "invalid_request_error", code = "bad_request") {
@@ -250,6 +255,78 @@ export function buildServer(config: AppConfig): FastifyInstance {
       logger.warn({ requestId, body }, "Invalid request body");
       reply.code(400).send(createClaudeErrorResponse("Invalid request body"));
       return;
+    }
+
+    // 🔒 PROTOCOL FIREWALL: Check if this is a Claude protocol request
+    const firewallResult = protocolFirewall({
+      url: req.url,
+      headers: req.headers as Record<string, string | undefined>,
+      body
+    });
+
+    logger.info({
+      requestId,
+      url: req.url,
+      forcedProvider: firewallResult.forceProvider,
+      reason: firewallResult.reason,
+      model: body.model
+    }, "Protocol firewall check");
+
+    // If forced to Anthropic, bypass local model routing
+    if (firewallResult.forceProvider === "anthropic") {
+      if (!config.providers.anthropic.apiKey) {
+        logger.error({ requestId }, "Anthropic API key not configured");
+        reply.code(500).send(createClaudeErrorResponse("Anthropic API not configured"));
+        return;
+      }
+
+      logger.info({
+        requestId,
+        reason: firewallResult.reason
+      }, "Forcing route to Anthropic API");
+
+      try {
+        const anthropicReq = {
+          model: body.model,
+          max_tokens: body.max_tokens,
+          messages: body.messages,
+          system: body.system,
+          temperature: body.temperature,
+          stream: body.stream || false
+        };
+
+        if (body.stream) {
+          reply.raw.setHeader("Content-Type", "text/event-stream");
+          reply.raw.setHeader("Cache-Control", "no-cache");
+          reply.raw.setHeader("Connection", "keep-alive");
+          reply.raw.setHeader("X-Accel-Buffering", "no");
+          reply.hijack();
+
+          const writeSSE = (chunk: string) => {
+            reply.raw.write(chunk);
+          };
+
+          await handleAnthropicStream({
+            req: anthropicReq,
+            config: config.providers.anthropic,
+            writeSSE
+          });
+
+          reply.raw.end();
+          return;
+        } else {
+          const result = await handleAnthropicRequest({
+            req: anthropicReq,
+            config: config.providers.anthropic
+          });
+          reply.send(result);
+          return;
+        }
+      } catch (err: any) {
+        logger.error({ requestId, err }, "Anthropic request error");
+        reply.code(500).send(createClaudeErrorResponse(err?.message || "Anthropic API error"));
+        return;
+      }
     }
 
     // Log incoming request details

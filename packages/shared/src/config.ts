@@ -4,7 +4,7 @@ import dotenv from "dotenv";
 import YAML from "yaml";
 import { expandHome } from "./paths";
 
-export type ProviderName = "ollama" | "gemini" | "codex";
+export type ProviderName = "ollama" | "gemini" | "codex" | "anthropic";
 
 export type ModelConfig = {
   id: string;
@@ -38,6 +38,10 @@ export type AppConfig = {
       fullAuto: boolean;
       allowSearch: boolean;
       cwd?: string;
+    };
+    anthropic: {
+      apiKey: string;
+      baseUrl: string;
     };
   };
 };
@@ -168,6 +172,10 @@ export function loadConfig(): AppConfig {
         fullAuto: parseBool(process.env.CODEX_FULL_AUTO, false),
         allowSearch: parseBool(process.env.CODEX_ALLOW_SEARCH, false),
         cwd: codexCwd
+      },
+      anthropic: {
+        apiKey: process.env.ANTHROPIC_API_KEY || "",
+        baseUrl: process.env.ANTHROPIC_BASE_URL || "https://open.bigmodel.cn/api/anthropic"
       }
     }
   };
