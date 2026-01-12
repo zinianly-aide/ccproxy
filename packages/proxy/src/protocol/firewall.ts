@@ -17,10 +17,19 @@ export interface FirewallOptions {
   allowedModels?: string[];  // Whitelist of models allowed for Claude protocol
 }
 
-const DEFAULT_OPTIONS: FirewallOptions = {
-  strictMode: process.env.STRICT_CLAUDE === "true",
-  allowedModels: process.env.CLAUDE_ALLOWED_MODELS?.split(",").map(m => m.trim()).filter(Boolean)
-};
+/**
+ * Get default options from environment variables
+ * This is called fresh each time to ensure env var changes are picked up
+ */
+function getDefaultOptions(): FirewallOptions {
+  return {
+    strictMode: process.env.STRICT_CLAUDE === "true",
+    allowedModels: process.env.CLAUDE_ALLOWED_MODELS
+      ?.split(",")
+      .map((m) => m.trim())
+      .filter(Boolean) || [],
+  };
+}
 
 /**
  * Check if a model is allowed to use Claude protocol
@@ -38,15 +47,20 @@ export function protocolFirewall(
     headers?: Record<string, string | undefined>;
     body?: { messages?: Array<{ content?: string | unknown }>; system?: string; model?: string };
   },
-  options: FirewallOptions = DEFAULT_OPTIONS
+  options?: FirewallOptions
 ): FirewallResult {
+  // Merge provided options with defaults from environment
+  const mergedOptions: FirewallOptions = {
+    ...getDefaultOptions(),
+    ...options,
+  };
   const isClaude = isClaudeProtocol(req);
 
   if (isClaude) {
     // Check model whitelist (only if whitelist is configured)
-    if (options.allowedModels && options.allowedModels.length > 0) {
+    if (mergedOptions.allowedModels && mergedOptions.allowedModels.length > 0) {
       const modelId = req.body?.model;
-      if (!isModelAllowed(modelId || "", options.allowedModels)) {
+      if (!isModelAllowed(modelId || "", mergedOptions.allowedModels)) {
         return {
           forceProvider: null,  // Don't force, let it fail with model not found
           reason: `Model '${modelId}' not in Claude protocol whitelist`,
@@ -84,7 +98,7 @@ export function getFirewallOptionsWithApiKey(
   customOptions?: Partial<FirewallOptions>
 ): FirewallOptions {
   const options: FirewallOptions = {
-    ...DEFAULT_OPTIONS,
+    ...getDefaultOptions(),
     ...customOptions
   };
 

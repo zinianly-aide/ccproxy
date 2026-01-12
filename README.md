@@ -35,6 +35,13 @@ pnpm start:mcp-http
 pnpm mcp
 ```
 
+## Proxy TUI
+Use the interactive config wizard to edit `.env` and optionally add a Dify model alias.
+```bash
+pnpm tui:proxy
+```
+Run it from the repo root. If `.env` does not exist, it will be created from `.env.example`.
+
 ## OpenAI-Compatible API
 - List models:
 ```bash
