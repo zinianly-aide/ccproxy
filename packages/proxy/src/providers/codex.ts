@@ -205,8 +205,13 @@ export async function handleCodexHttpCompletions(opts: {
 
   if (req.stream && writeSSE) {
     const decoder = new TextDecoder();
-    for await (const chunk of response.body ?? []) {
-      writeSSE(decoder.decode(chunk, { stream: true }));
+    if (response.body) {
+      const reader = response.body.getReader();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        writeSSE(decoder.decode(value, { stream: true }));
+      }
     }
     return { text: "", requestId };
   }

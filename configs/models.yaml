@@ -1,10 +1,76 @@
 models:
+  # Ollama models
   - id: ollama:llama3
     provider: ollama
-    model: llama3
+    model: llama3.2:latest
+  - id: ollama:llama3:latest
+    provider: ollama
+    model: llama3.2:latest
+  - id: ollama:qwen2.5
+    provider: ollama
+    model: qwen2.5:7b
+  - id: ollama:deepseek-coder
+    provider: ollama
+    model: deepseek-coder:6.7b
+
+  # Gemini models
   - id: gemini:gemini-pro
     provider: gemini
     model: gemini-pro
+
+  # Codex models
   - id: codex:gpt-4o-mini
     provider: codex
     model: gpt-4o-mini
+
+  # Claude 3 model aliases (route to Ollama for testing)
+  - id: claude-3-5-sonnet-20241022
+    provider: ollama
+    model: llama3.2:latest
+    description: "Claude 3.5 Sonnet (routed to Ollama llama3.2)"
+  - id: claude-3-5-sonnet
+    provider: ollama
+    model: llama3.2:latest
+    description: "Claude 3.5 Sonnet (routed to Ollama llama3.2)"
+  - id: claude-3-haiku-20240307
+    provider: ollama
+    model: qwen2.5:7b
+    description: "Claude 3 Haiku (routed to Ollama qwen2.5)"
+  - id: claude-3-haiku
+    provider: ollama
+    model: qwen2.5:7b
+    description: "Claude 3 Haiku (routed to Ollama qwen2.5)"
+  - id: claude-3-opus-20240229
+    provider: ollama
+    model: deepseek-coder:6.7b
+    description: "Claude 3 Opus (routed to Ollama deepseek-coder)"
+  - id: claude-3-opus
+    provider: ollama
+    model: deepseek-coder:6.7b
+    description: "Claude 3 Opus (routed to Ollama deepseek-coder)"
+  - id: claude-3-sonnet-20240229
+    provider: ollama
+    model: llama3.2:latest
+    description: "Claude 3 Sonnet (routed to Ollama llama3.2)"
+  - id: claude-3-sonnet
+    provider: ollama
+    model: llama3.2:latest
+    description: "Claude 3 Sonnet (routed to Ollama llama3.2)"
+
+  # Claude 4 model aliases (route to Ollama for testing)
+  - id: claude-haiku-4-5-20251001
+    provider: ollama
+    model: qwen2.5:7b
+    description: "Claude 4 Haiku 4.5 (routed to Ollama qwen2.5)"
+  - id: claude-haiku-4-5
+    provider: ollama
+    model: qwen2.5:7b
+    description: "Claude 4 Haiku 4.5 (routed to Ollama qwen2.5)"
+  - id: claude-sonnet-4-5-20250929
+    provider: ollama
+    model: llama3.2:latest
+    description: "Claude 4 Sonnet 4.5 (routed to Ollama llama3.2)"
+  - id: claude-sonnet-4-5
+    provider: ollama
+    model: llama3.2:latest
+    description: "Claude 4 Sonnet 4.5 (routed to Ollama llama3.2)"
