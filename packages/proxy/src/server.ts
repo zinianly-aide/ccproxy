@@ -28,6 +28,7 @@ import {
   handleCodexChatCompletions,
   handleCodexHttpCompletions
 } from "./providers/codex";
+import { handleDifyChatCompletions } from "./providers/dify";
 import {
   handleAnthropicRequest,
   handleAnthropicStream
@@ -175,6 +176,16 @@ export function buildServer(config: AppConfig): FastifyInstance {
               writeSSE
             });
           }
+        } else if (modelConfig.provider === "dify") {
+          await handleDifyChatCompletions({
+            req: body,
+            config: {
+              ...config.providers.dify,
+              model: modelConfig.model
+            },
+            requestId: openaiId,
+            writeSSE
+          });
         } else {
           writeSSE(
             `data: ${JSON.stringify(errorPayload("Unknown provider", "invalid_request"))}\n\n`
@@ -237,6 +248,16 @@ export function buildServer(config: AppConfig): FastifyInstance {
           });
           resultText = result.text;
         }
+      } else if (modelConfig.provider === "dify") {
+        const result = await handleDifyChatCompletions({
+          req: body,
+          config: {
+            ...config.providers.dify,
+            model: modelConfig.model
+          },
+          requestId: openaiId
+        });
+        resultText = result.text;
       }
 
       reply.send(createChatCompletionResponse(openaiId, body.model, resultText));
@@ -494,6 +515,16 @@ export function buildServer(config: AppConfig): FastifyInstance {
               writeSSE: convertWriteSSE
             });
           }
+        } else if (modelConfig.provider === "dify") {
+          await handleDifyChatCompletions({
+            req: openaiRequest,
+            config: {
+              ...config.providers.dify,
+              model: modelConfig.model
+            },
+            requestId: openaiId,
+            writeSSE: convertWriteSSE
+          });
         } else {
           writeSSE(createClaudeErrorResponse("Unknown provider"));
         }
@@ -560,6 +591,16 @@ export function buildServer(config: AppConfig): FastifyInstance {
           });
           resultText = result.text;
         }
+      } else if (modelConfig.provider === "dify") {
+        const result = await handleDifyChatCompletions({
+          req: openaiRequest,
+          config: {
+            ...config.providers.dify,
+            model: modelConfig.model
+          },
+          requestId: openaiId
+        });
+        resultText = result.text;
       }
 
       const duration = Date.now() - startTime;

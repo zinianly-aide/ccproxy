@@ -9,6 +9,8 @@ export type OpenAIChatCompletionsRequest = {
   stream?: boolean;
   temperature?: number;
   max_tokens?: number;
+  user?: string;
+  conversation_id?: string;
 };
 
 export type OpenAIChatCompletionChoice = {

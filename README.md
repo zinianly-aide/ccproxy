@@ -4,7 +4,7 @@ A local network AI gateway for macOS (Apple Silicon) that provides an OpenAI-com
 
 ## Features
 - OpenAI-compatible endpoints: `GET /v1/models`, `POST /v1/chat/completions` (SSE streaming supported).
-- Provider routing: Ollama (HTTP), Gemini CLI, Codex CLI (`codex exec --json`).
+- Provider routing: Ollama (HTTP), Gemini CLI, Codex CLI (`codex exec --json`), Dify (OpenAI-compatible or native chat).
 - MCP tools: `vscode.open`, `cmd.run`, `logs.stream`.
 - Security: API key enforcement, LAN-only CIDR allow list, path & command restrictions, rate limiting.
 
@@ -25,6 +25,7 @@ openssl rand -hex 32
 ```
 Edit `.env` and `configs/models.yaml` as needed.
 Set `CODEX_PROVIDER=cli` to use `codex exec --json`, or `CODEX_PROVIDER=http` with `CODEX_BASE_URL` for a compatible endpoint.
+Set `DIFY_API_MODE=openai` for Dify's OpenAI-compatible endpoint, or `DIFY_API_MODE=chat` to use `/v1/chat-messages`.
 
 ## Run
 ```bash
@@ -71,6 +72,24 @@ Set `MCP_HTTP_BASE_URL` to your LAN IP (for example `http://192.168.1.10:8788`) 
   }
 }
 ```
+Set your client model to `dify:cc` (or your configured alias) when using the Dify provider.
+
+## Dify Provider
+1. Add a model entry in `configs/models.yaml`:
+```yaml
+- id: dify:cc
+  provider: dify
+  model: <dify-app-id-or-name>
+```
+2. Configure environment variables:
+```
+DIFY_BASE_URL=http://localhost:5001
+DIFY_API_KEY=...
+DIFY_API_MODE=openai
+DIFY_CONTEXT_MODE=stateless
+DIFY_USER=lanai
+```
+3. Restart `pnpm start:proxy`.
 
 ### Typical prompt
 "Please run tests in ~/code/myrepo using `cmd.run`, stream logs, and summarize failures."

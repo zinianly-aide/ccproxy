@@ -23,6 +23,11 @@ models:
     provider: codex
     model: gpt-4o-mini
 
+  # Dify app example (requires DIFY_BASE_URL + DIFY_API_KEY)
+  # - id: dify:cc
+  #   provider: dify
+  #   model: dify-app-id-or-name
+
   # Claude 3 model aliases (route to Ollama for testing)
   - id: claude-3-5-sonnet-20241022
     provider: ollama
