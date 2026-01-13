@@ -9,6 +9,8 @@ export type OpenAIChatCompletionsRequest = {
   stream?: boolean;
   temperature?: number;
   max_tokens?: number;
+  user?: string;
+  conversation_id?: string;
 };
 
 export type OpenAIChatCompletionChoice = {
@@ -17,12 +19,19 @@ export type OpenAIChatCompletionChoice = {
   finish_reason: "stop" | "length" | null;
 };
 
+export type OpenAIChatCompletionUsage = {
+  prompt_tokens: number;
+  completion_tokens: number;
+  total_tokens: number;
+};
+
 export type OpenAIChatCompletionsResponse = {
   id: string;
   object: "chat.completion";
   created: number;
   model: string;
   choices: OpenAIChatCompletionChoice[];
+  usage?: OpenAIChatCompletionUsage;
 };
 
 export function toPrompt(messages: OpenAIChatMessage[]): string {
@@ -74,7 +83,8 @@ export function createChatCompletionResponse(
   id: string,
   model: string,
   content: string,
-  finishReason: "stop" | "length" = "stop"
+  finishReason: "stop" | "length" = "stop",
+  usage?: OpenAIChatCompletionUsage
 ): OpenAIChatCompletionsResponse {
   return {
     id,
@@ -87,6 +97,7 @@ export function createChatCompletionResponse(
         message: { role: "assistant", content },
         finish_reason: finishReason
       }
-    ]
+    ],
+    usage
   };
 }

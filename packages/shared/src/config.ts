@@ -4,7 +4,7 @@ import dotenv from "dotenv";
 import YAML from "yaml";
 import { expandHome } from "./paths";
 
-export type ProviderName = "ollama" | "gemini" | "codex";
+export type ProviderName = "ollama" | "gemini" | "codex" | "anthropic" | "dify";
 
 export type ModelConfig = {
   id: string;
@@ -19,6 +19,9 @@ export type AppConfig = {
   rateLimitPerMin: number;
   repoRoot: string;
   corsAllowOrigins: string[];
+  logChatContent: boolean;
+  logChatContentMaxChars: number;
+  logTokenUsage: boolean;
   proxyHost: string;
   proxyPort: number;
   mcpHttpHost: string;
@@ -38,6 +41,19 @@ export type AppConfig = {
       fullAuto: boolean;
       allowSearch: boolean;
       cwd?: string;
+    };
+    dify: {
+      baseUrl: string;
+      apiKey: string;
+      apiMode: "openai" | "chat";
+      contextMode: "stateless" | "stateful";
+      user: string;
+      conversationId?: string;
+      inputs: Record<string, unknown>;
+    };
+    anthropic: {
+      apiKey: string;
+      baseUrl: string;
     };
   };
 };
@@ -69,6 +85,37 @@ function parseBool(input: string | undefined, fallback: boolean): boolean {
   if (["1", "true", "yes", "on"].includes(normalized)) return true;
   if (["0", "false", "no", "off"].includes(normalized)) return false;
   return fallback;
+}
+
+function parseDifyApiMode(input: string | undefined): "openai" | "chat" {
+  if (!input) return "openai";
+  const normalized = input.trim().toLowerCase();
+  if (normalized === "chat") return "chat";
+  return "openai";
+}
+
+function parseDifyContextMode(input: string | undefined): "stateless" | "stateful" {
+  if (!input) return "stateless";
+  const normalized = input.trim().toLowerCase();
+  if (normalized === "stateful") return "stateful";
+  return "stateless";
+}
+
+function parseJsonObject(
+  input: string | undefined,
+  fallback: Record<string, unknown> = {}
+): Record<string, unknown> {
+  if (!input) return fallback;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(input);
+  } catch {
+    throw new Error("DIFY_INPUTS_JSON must be a JSON object");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error("DIFY_INPUTS_JSON must be a JSON object");
+  }
+  return parsed as Record<string, unknown>;
 }
 
 function splitArgs(input: string | undefined): string[] {
@@ -117,6 +164,9 @@ export function loadConfig(): AppConfig {
   const rateLimitPerMin = parseNumber(process.env.RATE_LIMIT_PER_MIN, 120);
   const repoRoot = expandHome(process.env.REPO_ROOT || "~/code");
   const corsAllowOrigins = parseList(process.env.CORS_ALLOW_ORIGINS, []);
+  const logChatContent = parseBool(process.env.LOG_CHAT_CONTENT, false);
+  const logChatContentMaxChars = parseNumber(process.env.LOG_CHAT_CONTENT_MAX_CHARS, 2000);
+  const logTokenUsage = parseBool(process.env.LOG_TOKEN_USAGE, false);
 
   const proxyHost = process.env.PROXY_HOST || "0.0.0.0";
   const proxyPort = parseNumber(process.env.PROXY_PORT, 8787);
@@ -133,6 +183,11 @@ export function loadConfig(): AppConfig {
   const codexCwd = process.env.CODEX_CWD
     ? expandHome(process.env.CODEX_CWD)
     : undefined;
+  const difyApiMode = parseDifyApiMode(process.env.DIFY_API_MODE);
+  const difyContextMode = parseDifyContextMode(process.env.DIFY_CONTEXT_MODE);
+  const difyInputs = parseJsonObject(process.env.DIFY_INPUTS_JSON);
+  const difyUser = process.env.DIFY_USER || "lanai";
+  const difyConversationId = process.env.DIFY_CONVERSATION_ID || undefined;
 
   return {
     apiKey,
@@ -140,6 +195,9 @@ export function loadConfig(): AppConfig {
     rateLimitPerMin,
     repoRoot,
     corsAllowOrigins,
+    logChatContent,
+    logChatContentMaxChars,
+    logTokenUsage,
     proxyHost,
     proxyPort,
     mcpHttpHost,
@@ -168,6 +226,19 @@ export function loadConfig(): AppConfig {
         fullAuto: parseBool(process.env.CODEX_FULL_AUTO, false),
         allowSearch: parseBool(process.env.CODEX_ALLOW_SEARCH, false),
         cwd: codexCwd
+      },
+      dify: {
+        baseUrl: process.env.DIFY_BASE_URL || "",
+        apiKey: process.env.DIFY_API_KEY || "",
+        apiMode: difyApiMode,
+        contextMode: difyContextMode,
+        user: difyUser,
+        conversationId: difyConversationId,
+        inputs: difyInputs
+      },
+      anthropic: {
+        apiKey: process.env.ANTHROPIC_API_KEY || "",
+        baseUrl: process.env.ANTHROPIC_BASE_URL || "https://open.bigmodel.cn/api/anthropic"
       }
     }
   };

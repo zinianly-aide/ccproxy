@@ -7,6 +7,7 @@
     "start:proxy": "node packages/proxy/dist/index.js",
     "start:mcp-http": "node packages/mcp/dist/httpControl.js",
     "mcp": "node packages/mcp/dist/index.js",
+    "tui:proxy": "tsx packages/proxy/src/tui.ts",
     "test": "tsx --test tests/*.test.ts"
   },
   "devDependencies": {
