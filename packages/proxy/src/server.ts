@@ -120,6 +120,7 @@ export function buildServer(config: AppConfig): FastifyInstance {
 
   const logChatContent = (opts: {
     requestId: string;
+    subagentRunId?: string;
     model: string;
     system?: unknown;
     messages: Array<{ role: string; content: unknown }>;
@@ -129,6 +130,7 @@ export function buildServer(config: AppConfig): FastifyInstance {
     const maxChars = config.logChatContentMaxChars;
     logger.info({
       requestId: opts.requestId,
+      subagentRunId: opts.subagentRunId,
       model: opts.model,
       system: opts.system ? truncateLogValue(safeStringify(opts.system), maxChars) : undefined,
       messages: formatMessagesForLog(opts.messages, maxChars)
@@ -137,6 +139,7 @@ export function buildServer(config: AppConfig): FastifyInstance {
 
   const logChatResponse = (opts: {
     requestId: string;
+    subagentRunId?: string;
     model: string;
     content: string;
     label: string;
@@ -145,6 +148,7 @@ export function buildServer(config: AppConfig): FastifyInstance {
     const maxChars = config.logChatContentMaxChars;
     logger.info({
       requestId: opts.requestId,
+      subagentRunId: opts.subagentRunId,
       model: opts.model,
       content: truncateLogValue(opts.content, maxChars),
       contentLength: opts.content.length
@@ -153,6 +157,7 @@ export function buildServer(config: AppConfig): FastifyInstance {
 
   const logTokenUsage = (opts: {
     requestId: string;
+    subagentRunId?: string;
     model: string;
     provider?: string;
     stream: boolean;
@@ -161,6 +166,7 @@ export function buildServer(config: AppConfig): FastifyInstance {
     if (!config.logTokenUsage) return;
     logger.info({
       requestId: opts.requestId,
+      subagentRunId: opts.subagentRunId,
       model: opts.model,
       provider: opts.provider,
       stream: opts.stream,
@@ -222,7 +228,14 @@ export function buildServer(config: AppConfig): FastifyInstance {
 
   app.post("/v1/chat/completions", async (req, reply) => {
     const requestId = randomUUID();
+    const subagentRunId =
+      typeof req.headers["x-subagent-run-id"] === "string"
+        ? req.headers["x-subagent-run-id"]
+        : undefined;
     reply.header("x-request-id", requestId);
+    if (subagentRunId) {
+      reply.header("x-subagent-run-id", subagentRunId);
+    }
 
     const body = req.body as OpenAIChatCompletionsRequest | undefined;
     if (!body || !body.model || !Array.isArray(body.messages)) {
@@ -239,6 +252,7 @@ export function buildServer(config: AppConfig): FastifyInstance {
     const openaiId = `chatcmpl_${requestId.replace(/-/g, "")}`;
     logChatContent({
       requestId,
+      subagentRunId,
       model: body.model,
       messages: body.messages,
       label: "OpenAI request content"
@@ -354,6 +368,7 @@ export function buildServer(config: AppConfig): FastifyInstance {
         if (streamedText.length) {
           logChatResponse({
             requestId,
+            subagentRunId,
             model: body.model,
             content: streamedText,
             label: "OpenAI response content"
@@ -364,6 +379,7 @@ export function buildServer(config: AppConfig): FastifyInstance {
           const usage = estimateTokenUsage(body.messages, streamedText);
           logTokenUsage({
             requestId,
+            subagentRunId,
             model: body.model,
             provider: modelConfig.provider,
             stream: true,
@@ -441,6 +457,7 @@ export function buildServer(config: AppConfig): FastifyInstance {
       if (resultText.length) {
         logChatResponse({
           requestId,
+          subagentRunId,
           model: body.model,
           content: resultText,
           label: "OpenAI response content"
@@ -450,6 +467,7 @@ export function buildServer(config: AppConfig): FastifyInstance {
       const usage = estimateTokenUsage(body.messages, resultText);
       logTokenUsage({
         requestId,
+        subagentRunId,
         model: body.model,
         provider: modelConfig.provider,
         stream: false,
@@ -476,7 +494,14 @@ export function buildServer(config: AppConfig): FastifyInstance {
   // Claude Messages API endpoint (compatible with Claude clients)
   app.post("/v1/messages", async (req, reply) => {
     const requestId = randomUUID();
+    const subagentRunId =
+      typeof req.headers["x-subagent-run-id"] === "string"
+        ? req.headers["x-subagent-run-id"]
+        : undefined;
     reply.header("x-request-id", requestId);
+    if (subagentRunId) {
+      reply.header("x-subagent-run-id", subagentRunId);
+    }
 
     const body = req.body as ClaudeMessageRequest | undefined;
     if (!body || !body.model || !Array.isArray(body.messages) || !body.max_tokens) {
@@ -497,6 +522,7 @@ export function buildServer(config: AppConfig): FastifyInstance {
 
     logger.info({
       requestId,
+      subagentRunId,
       url: req.url,
       forcedProvider: firewallResult.forceProvider,
       reason: firewallResult.reason,
@@ -526,6 +552,7 @@ export function buildServer(config: AppConfig): FastifyInstance {
       } else {
         logger.info({
           requestId,
+          subagentRunId,
           reason: firewallResult.reason
         }, "Forcing route to Anthropic API");
 
@@ -593,6 +620,7 @@ export function buildServer(config: AppConfig): FastifyInstance {
             if (responseText.length) {
               logChatResponse({
                 requestId,
+                subagentRunId,
                 model: body.model,
                 content: responseText,
                 label: "Claude response content"
@@ -601,6 +629,7 @@ export function buildServer(config: AppConfig): FastifyInstance {
             if (config.logTokenUsage && (promptTokens || completionTokens)) {
               logTokenUsage({
                 requestId,
+                subagentRunId,
                 model: body.model,
                 provider: "anthropic",
                 stream: true,
@@ -634,6 +663,7 @@ export function buildServer(config: AppConfig): FastifyInstance {
             if (config.logTokenUsage && result?.usage) {
               logTokenUsage({
                 requestId,
+                subagentRunId,
                 model: result.model || body.model,
                 provider: "anthropic",
                 stream: false,
@@ -659,6 +689,7 @@ export function buildServer(config: AppConfig): FastifyInstance {
     // Log incoming request details
     logger.info({
       requestId,
+      subagentRunId,
       model: body.model,
       messageCount: body.messages.length,
       maxTokens: body.max_tokens,
@@ -687,6 +718,7 @@ export function buildServer(config: AppConfig): FastifyInstance {
 
     logChatContent({
       requestId,
+      subagentRunId,
       model: body.model,
       system: body.system,
       messages: body.messages,
@@ -700,7 +732,13 @@ export function buildServer(config: AppConfig): FastifyInstance {
       return;
     }
 
-    logger.info({ requestId, requestedModel: body.model, targetProvider: modelConfig.provider, targetModel: modelConfig.model }, "Model mapping");
+    logger.info({
+      requestId,
+      subagentRunId,
+      requestedModel: body.model,
+      targetProvider: modelConfig.provider,
+      targetModel: modelConfig.model
+    }, "Model mapping");
 
     const claudeId = `msg_${requestId.replace(/-/g, "")}`;
 
@@ -729,6 +767,7 @@ export function buildServer(config: AppConfig): FastifyInstance {
 
     logger.info({
       requestId,
+      subagentRunId,
       provider: modelConfig.provider,
       targetModel: actualModel,
       stream: openaiRequest.stream,
@@ -837,6 +876,7 @@ export function buildServer(config: AppConfig): FastifyInstance {
         if (buffer.length) {
           logChatResponse({
             requestId,
+            subagentRunId,
             model: body.model,
             content: buffer,
             label: "Claude response content"
@@ -846,6 +886,7 @@ export function buildServer(config: AppConfig): FastifyInstance {
         writeSSE(claudeSseMessageDelta(usage.completionTokens));
         logTokenUsage({
           requestId,
+          subagentRunId,
           model: body.model,
           provider: modelConfig.provider,
           stream: true,
@@ -926,6 +967,7 @@ export function buildServer(config: AppConfig): FastifyInstance {
       if (resultText.length) {
         logChatResponse({
           requestId,
+          subagentRunId,
           model: body.model,
           content: resultText,
           label: "Claude response content"
@@ -954,6 +996,7 @@ export function buildServer(config: AppConfig): FastifyInstance {
 
       logTokenUsage({
         requestId,
+        subagentRunId,
         model: body.model,
         provider: modelConfig.provider,
         stream: false,

@@ -19,7 +19,7 @@ async function main() {
     createVscodeOpenTool(config.repoRoot),
     createCmdRunTool(config.repoRoot, runStore),
     createLogsStreamTool(config, runStore),
-    createSubagentTool(config)
+    createSubagentTool(config, runStore)
   ];
 
   startMcpServer({ tools });
