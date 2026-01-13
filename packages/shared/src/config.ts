@@ -19,6 +19,9 @@ export type AppConfig = {
   rateLimitPerMin: number;
   repoRoot: string;
   corsAllowOrigins: string[];
+  logChatContent: boolean;
+  logChatContentMaxChars: number;
+  logTokenUsage: boolean;
   proxyHost: string;
   proxyPort: number;
   mcpHttpHost: string;
@@ -161,6 +164,9 @@ export function loadConfig(): AppConfig {
   const rateLimitPerMin = parseNumber(process.env.RATE_LIMIT_PER_MIN, 120);
   const repoRoot = expandHome(process.env.REPO_ROOT || "~/code");
   const corsAllowOrigins = parseList(process.env.CORS_ALLOW_ORIGINS, []);
+  const logChatContent = parseBool(process.env.LOG_CHAT_CONTENT, false);
+  const logChatContentMaxChars = parseNumber(process.env.LOG_CHAT_CONTENT_MAX_CHARS, 2000);
+  const logTokenUsage = parseBool(process.env.LOG_TOKEN_USAGE, false);
 
   const proxyHost = process.env.PROXY_HOST || "0.0.0.0";
   const proxyPort = parseNumber(process.env.PROXY_PORT, 8787);
@@ -189,6 +195,9 @@ export function loadConfig(): AppConfig {
     rateLimitPerMin,
     repoRoot,
     corsAllowOrigins,
+    logChatContent,
+    logChatContentMaxChars,
+    logTokenUsage,
     proxyHost,
     proxyPort,
     mcpHttpHost,

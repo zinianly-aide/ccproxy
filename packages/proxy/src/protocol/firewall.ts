@@ -31,6 +31,13 @@ function getDefaultOptions(): FirewallOptions {
   };
 }
 
+function matchesPattern(modelId: string, pattern: string): boolean {
+  if (!pattern) return false;
+  if (!pattern.includes("*")) return modelId === pattern;
+  const escaped = pattern.replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*");
+  return new RegExp(`^${escaped}$`).test(modelId);
+}
+
 /**
  * Check if a model is allowed to use Claude protocol
  */
@@ -38,7 +45,7 @@ function isModelAllowed(modelId: string, allowedModels?: string[]): boolean {
   if (!allowedModels || allowedModels.length === 0) {
     return true;  // No restrictions if whitelist is empty
   }
-  return allowedModels.includes(modelId);
+  return allowedModels.some((pattern) => matchesPattern(modelId, pattern));
 }
 
 export function protocolFirewall(

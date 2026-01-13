@@ -1,4 +1,4 @@
-import Fastify, { type FastifyBaseLogger, type FastifyInstance } from "fastify";
+import Fastify, { type FastifyBaseLogger, type FastifyInstance, type FastifyRequest } from "fastify";
 import cors from "@fastify/cors";
 import {
   AppConfig,
@@ -36,9 +36,49 @@ import {
 import { protocolFirewall } from "./protocol/firewall";
 import { sanitizeMessages } from "./protocol/messageSanitizer";
 import { randomUUID } from "node:crypto";
+import { estimateTokenUsage, type TokenUsage } from "./token";
 
 function errorPayload(message: string, type = "invalid_request_error", code = "bad_request") {
   return { error: { message, type, code } };
+}
+
+type UnhandledEntry = {
+  key: string;
+  method: string;
+  url: string;
+  count: number;
+  lastSeen: string;
+  reason: string;
+};
+
+function safeStringify(value: unknown): string {
+  if (typeof value === "string") return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return "[unserializable]";
+  }
+}
+
+function truncateLogValue(value: string, maxChars: number): string {
+  if (maxChars <= 0) return value;
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars)}...<truncated>`;
+}
+
+function formatMessagesForLog(
+  messages: Array<{ role: string; content: unknown }>,
+  maxChars: number
+): Array<{ role: string; content: string; contentType: string; contentLength: number }> {
+  return messages.map((msg) => {
+    const raw = safeStringify(msg.content);
+    return {
+      role: msg.role,
+      content: truncateLogValue(raw, maxChars),
+      contentType: typeof msg.content,
+      contentLength: raw.length
+    };
+  });
 }
 
 export function buildServer(config: AppConfig): FastifyInstance {
@@ -56,6 +96,77 @@ export function buildServer(config: AppConfig): FastifyInstance {
   }
 
   const limiter = new RateLimiter(config.rateLimitPerMin, 60_000);
+  const unhandledRoutes = new Map<string, UnhandledEntry>();
+
+  const recordUnhandled = (req: FastifyRequest, reason: string) => {
+    const key = `${req.method} ${req.url}`;
+    const now = new Date().toISOString();
+    const existing = unhandledRoutes.get(key);
+    if (existing) {
+      existing.count += 1;
+      existing.lastSeen = now;
+      existing.reason = reason;
+      return;
+    }
+    unhandledRoutes.set(key, {
+      key,
+      method: req.method,
+      url: req.url,
+      count: 1,
+      lastSeen: now,
+      reason
+    });
+  };
+
+  const logChatContent = (opts: {
+    requestId: string;
+    model: string;
+    system?: unknown;
+    messages: Array<{ role: string; content: unknown }>;
+    label: string;
+  }) => {
+    if (!config.logChatContent) return;
+    const maxChars = config.logChatContentMaxChars;
+    logger.info({
+      requestId: opts.requestId,
+      model: opts.model,
+      system: opts.system ? truncateLogValue(safeStringify(opts.system), maxChars) : undefined,
+      messages: formatMessagesForLog(opts.messages, maxChars)
+    }, opts.label);
+  };
+
+  const logChatResponse = (opts: {
+    requestId: string;
+    model: string;
+    content: string;
+    label: string;
+  }) => {
+    if (!config.logChatContent) return;
+    const maxChars = config.logChatContentMaxChars;
+    logger.info({
+      requestId: opts.requestId,
+      model: opts.model,
+      content: truncateLogValue(opts.content, maxChars),
+      contentLength: opts.content.length
+    }, opts.label);
+  };
+
+  const logTokenUsage = (opts: {
+    requestId: string;
+    model: string;
+    provider?: string;
+    stream: boolean;
+    usage: TokenUsage;
+  }) => {
+    if (!config.logTokenUsage) return;
+    logger.info({
+      requestId: opts.requestId,
+      model: opts.model,
+      provider: opts.provider,
+      stream: opts.stream,
+      tokenUsage: opts.usage
+    }, "Token usage");
+  };
 
   app.addHook("onRequest", (req, reply, done) => {
     const ip = req.ip;
@@ -99,7 +210,13 @@ export function buildServer(config: AppConfig): FastifyInstance {
     reply.send({ object: "list", data });
   });
 
-  app.post("/v1/embeddings", async (_req, reply) => {
+  app.get("/__lanai/unhandled", async (_req, reply) => {
+    const data = Array.from(unhandledRoutes.values()).sort((a, b) => b.count - a.count);
+    reply.send({ total: data.length, data });
+  });
+
+  app.post("/v1/embeddings", async (req, reply) => {
+    recordUnhandled(req, "not_supported");
     reply.code(501).send(errorPayload("Embeddings not configured", "not_supported"));
   });
 
@@ -120,6 +237,12 @@ export function buildServer(config: AppConfig): FastifyInstance {
     }
 
     const openaiId = `chatcmpl_${requestId.replace(/-/g, "")}`;
+    logChatContent({
+      requestId,
+      model: body.model,
+      messages: body.messages,
+      label: "OpenAI request content"
+    });
 
     if (body.stream) {
       reply.raw.setHeader("Content-Type", "text/event-stream");
@@ -128,28 +251,59 @@ export function buildServer(config: AppConfig): FastifyInstance {
       reply.raw.setHeader("X-Accel-Buffering", "no");
       reply.hijack();
 
+      let providerText = "";
+      let sseCapturedText = "";
+      let sseBuffer = "";
+      const shouldParseSse = config.logTokenUsage || config.logChatContent;
+
       const writeSSE = (chunk: string) => {
+        if (shouldParseSse) {
+          sseBuffer += chunk;
+          let newlineIndex = sseBuffer.indexOf("\n");
+          while (newlineIndex >= 0) {
+            const line = sseBuffer.slice(0, newlineIndex).trim();
+            sseBuffer = sseBuffer.slice(newlineIndex + 1);
+            newlineIndex = sseBuffer.indexOf("\n");
+            if (!line.startsWith("data: ")) continue;
+            const data = line.slice(6).trim();
+            if (!data || data === "[DONE]") continue;
+            try {
+              const parsed = JSON.parse(data);
+              const delta = parsed?.choices?.[0]?.delta?.content
+                ?? parsed?.choices?.[0]?.delta?.text
+                ?? parsed?.choices?.[0]?.text
+                ?? parsed?.choices?.[0]?.message?.content;
+              if (typeof delta === "string" && delta.length) {
+                sseCapturedText += delta;
+              }
+            } catch {
+              // Ignore invalid JSON.
+            }
+          }
+        }
         reply.raw.write(chunk);
       };
 
       try {
         if (modelConfig.provider === "ollama") {
-          await handleOllamaChatCompletions({
+          const result = await handleOllamaChatCompletions({
             req: body,
             config: config.providers.ollama,
             requestId: openaiId,
             writeSSE
           });
+          providerText = result.text;
         } else if (modelConfig.provider === "gemini") {
-          await handleGeminiChatCompletions({
+          const result = await handleGeminiChatCompletions({
             req: body,
             config: config.providers.gemini,
             requestId: openaiId,
             writeSSE
           });
+          providerText = result.text;
         } else if (modelConfig.provider === "codex") {
           if (config.providers.codex.provider === "http") {
-            await handleCodexHttpCompletions({
+            const result = await handleCodexHttpCompletions({
               req: body,
               config: {
                 baseUrl: config.providers.codex.baseUrl,
@@ -159,8 +313,9 @@ export function buildServer(config: AppConfig): FastifyInstance {
               requestId: openaiId,
               writeSSE
             });
+            providerText = result.text;
           } else {
-            await handleCodexChatCompletions({
+            const result = await handleCodexChatCompletions({
               req: body,
               config: {
                 codexBin: config.providers.codex.bin,
@@ -175,9 +330,10 @@ export function buildServer(config: AppConfig): FastifyInstance {
               requestId: openaiId,
               writeSSE
             });
+            providerText = result.text;
           }
         } else if (modelConfig.provider === "dify") {
-          await handleDifyChatCompletions({
+          const result = await handleDifyChatCompletions({
             req: body,
             config: {
               ...config.providers.dify,
@@ -186,11 +342,33 @@ export function buildServer(config: AppConfig): FastifyInstance {
             requestId: openaiId,
             writeSSE
           });
+          providerText = result.text;
         } else {
           writeSSE(
             `data: ${JSON.stringify(errorPayload("Unknown provider", "invalid_request"))}\n\n`
           );
           writeSSE("data: [DONE]\n\n");
+        }
+
+        const streamedText = sseCapturedText || providerText;
+        if (streamedText.length) {
+          logChatResponse({
+            requestId,
+            model: body.model,
+            content: streamedText,
+            label: "OpenAI response content"
+          });
+        }
+
+        if (streamedText.length || config.logTokenUsage) {
+          const usage = estimateTokenUsage(body.messages, streamedText);
+          logTokenUsage({
+            requestId,
+            model: body.model,
+            provider: modelConfig.provider,
+            stream: true,
+            usage
+          });
         }
       } catch (err: any) {
         logger.error({ err }, "streaming error");
@@ -260,7 +438,35 @@ export function buildServer(config: AppConfig): FastifyInstance {
         resultText = result.text;
       }
 
-      reply.send(createChatCompletionResponse(openaiId, body.model, resultText));
+      if (resultText.length) {
+        logChatResponse({
+          requestId,
+          model: body.model,
+          content: resultText,
+          label: "OpenAI response content"
+        });
+      }
+
+      const usage = estimateTokenUsage(body.messages, resultText);
+      logTokenUsage({
+        requestId,
+        model: body.model,
+        provider: modelConfig.provider,
+        stream: false,
+        usage
+      });
+
+      reply.send(createChatCompletionResponse(
+        openaiId,
+        body.model,
+        resultText,
+        "stop",
+        {
+          prompt_tokens: usage.promptTokens,
+          completion_tokens: usage.completionTokens,
+          total_tokens: usage.totalTokens
+        }
+      ));
     } catch (err: any) {
       logger.error({ err }, "completion error");
       reply.code(500).send(errorPayload(err?.message || "Provider error", "server_error"));
@@ -340,7 +546,41 @@ export function buildServer(config: AppConfig): FastifyInstance {
             reply.raw.setHeader("X-Accel-Buffering", "no");
             reply.hijack();
 
+            let promptTokens = 0;
+            let completionTokens = 0;
+            let responseText = "";
+            const shouldParse = config.logTokenUsage || config.logChatContent;
             const writeSSE = (chunk: string) => {
+              if (shouldParse) {
+                const lines = chunk.split("\n");
+                for (const line of lines) {
+                  if (!line.startsWith("data: ")) continue;
+                  const data = line.slice(6).trim();
+                  if (!data) continue;
+                  try {
+                    const parsed = JSON.parse(data);
+                    if (config.logTokenUsage) {
+                      const usage = parsed?.usage;
+                      if (typeof usage?.input_tokens === "number") {
+                        promptTokens = usage.input_tokens;
+                      }
+                      if (typeof usage?.output_tokens === "number") {
+                        completionTokens = usage.output_tokens;
+                      }
+                    }
+                    const deltaText = parsed?.delta?.text;
+                    if (typeof deltaText === "string") {
+                      responseText += deltaText;
+                    }
+                    const blockText = parsed?.content_block?.text;
+                    if (typeof blockText === "string") {
+                      responseText += blockText;
+                    }
+                  } catch {
+                    // Ignore invalid JSON.
+                  }
+                }
+              }
               reply.raw.write(chunk);
             };
 
@@ -350,6 +590,29 @@ export function buildServer(config: AppConfig): FastifyInstance {
               writeSSE
             });
 
+            if (responseText.length) {
+              logChatResponse({
+                requestId,
+                model: body.model,
+                content: responseText,
+                label: "Claude response content"
+              });
+            }
+            if (config.logTokenUsage && (promptTokens || completionTokens)) {
+              logTokenUsage({
+                requestId,
+                model: body.model,
+                provider: "anthropic",
+                stream: true,
+                usage: {
+                  promptTokens,
+                  completionTokens,
+                  totalTokens: promptTokens + completionTokens,
+                  approx: false
+                }
+              });
+            }
+
             reply.raw.end();
             return;
           } else {
@@ -357,6 +620,31 @@ export function buildServer(config: AppConfig): FastifyInstance {
               req: anthropicReq,
               config: config.providers.anthropic
             });
+            const responseText = Array.isArray(result.content)
+              ? result.content.map((item) => item.text).filter(Boolean).join("\n")
+              : "";
+            if (responseText.length) {
+              logChatResponse({
+                requestId,
+                model: result.model || body.model,
+                content: responseText,
+                label: "Claude response content"
+              });
+            }
+            if (config.logTokenUsage && result?.usage) {
+              logTokenUsage({
+                requestId,
+                model: result.model || body.model,
+                provider: "anthropic",
+                stream: false,
+                usage: {
+                  promptTokens: result.usage.input_tokens,
+                  completionTokens: result.usage.output_tokens,
+                  totalTokens: result.usage.input_tokens + result.usage.output_tokens,
+                  approx: false
+                }
+              });
+            }
             reply.send(result);
             return;
           }
@@ -397,6 +685,14 @@ export function buildServer(config: AppConfig): FastifyInstance {
       body.messages = sanitizedMessages as any;
     }
 
+    logChatContent({
+      requestId,
+      model: body.model,
+      system: body.system,
+      messages: body.messages,
+      label: "Claude request content"
+    });
+
     const modelConfig = config.models.find((model) => model.id === body.model);
     if (!modelConfig) {
       logger.warn({ requestId, requestedModel: body.model, availableModels: config.models.map(m => m.id) }, "Model not found");
@@ -431,7 +727,14 @@ export function buildServer(config: AppConfig): FastifyInstance {
       max_tokens: body.max_tokens
     };
 
-    logger.info({ requestId, openaiRequest }, "Sending request to provider");
+    logger.info({
+      requestId,
+      provider: modelConfig.provider,
+      targetModel: actualModel,
+      stream: openaiRequest.stream,
+      messageCount: openaiRequest.messages.length,
+      maxTokens: openaiRequest.max_tokens
+    }, "Sending request to provider");
 
     const openaiId = `chatcmpl_${requestId.replace(/-/g, "")}`;
 
@@ -531,7 +834,23 @@ export function buildServer(config: AppConfig): FastifyInstance {
 
         // Send Claude stream end events
         writeSSE(claudeSseContentBlockStop(contentBlockIndex));
-        writeSSE(claudeSseMessageDelta());
+        if (buffer.length) {
+          logChatResponse({
+            requestId,
+            model: body.model,
+            content: buffer,
+            label: "Claude response content"
+          });
+        }
+        const usage = estimateTokenUsage(openaiRequest.messages, buffer);
+        writeSSE(claudeSseMessageDelta(usage.completionTokens));
+        logTokenUsage({
+          requestId,
+          model: body.model,
+          provider: modelConfig.provider,
+          stream: true,
+          usage
+        });
         writeSSE(claudeSseMessageStop());
       } catch (err: any) {
         logger.error({ err }, "Claude streaming error");
@@ -604,22 +923,54 @@ export function buildServer(config: AppConfig): FastifyInstance {
       }
 
       const duration = Date.now() - startTime;
-      const claudeResponse = openaiToClaudeResponse(claudeId, body.model, resultText);
+      if (resultText.length) {
+        logChatResponse({
+          requestId,
+          model: body.model,
+          content: resultText,
+          label: "Claude response content"
+        });
+      }
+      const usage = estimateTokenUsage(openaiRequest.messages, resultText);
+      const claudeResponse = openaiToClaudeResponse(
+        claudeId,
+        body.model,
+        resultText,
+        "stop",
+        { inputTokens: usage.promptTokens, outputTokens: usage.completionTokens }
+      );
 
       logger.info({
         requestId,
         provider: modelConfig.provider,
         targetModel: actualModel,
         duration,
+        promptTokens: usage.promptTokens,
+        completionTokens: usage.completionTokens,
+        totalTokens: usage.totalTokens,
         responseLength: resultText.length,
         responsePreview: resultText.substring(0, 200)
       }, "Request completed successfully");
+
+      logTokenUsage({
+        requestId,
+        model: body.model,
+        provider: modelConfig.provider,
+        stream: false,
+        usage
+      });
 
       reply.send(claudeResponse);
     } catch (err: any) {
       logger.error({ requestId, err }, "Claude completion error");
       reply.code(500).send(createClaudeErrorResponse(err?.message || "Provider error"));
     }
+  });
+
+  app.setNotFoundHandler((req, reply) => {
+    recordUnhandled(req, "not_found");
+    logger.warn({ method: req.method, url: req.url }, "Unhandled route");
+    reply.code(404).send(errorPayload("Not found", "not_found", "not_found"));
   });
 
   return app;

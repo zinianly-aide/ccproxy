@@ -126,8 +126,11 @@ export function openaiToClaudeResponse(
   openaiId: string,
   model: string,
   content: string,
-  finishReason: "stop" | "length" = "stop"
+  finishReason: "stop" | "length" = "stop",
+  usage?: { inputTokens: number; outputTokens: number }
 ): ClaudeMessageResponse {
+  const inputTokens = usage?.inputTokens ?? 0;
+  const outputTokens = usage?.outputTokens ?? content.length;
   return {
     id: openaiId,
     type: "message",
@@ -137,8 +140,8 @@ export function openaiToClaudeResponse(
     stop_reason: finishReason === "length" ? "max_tokens" : "end_turn",
     stop_sequence: null,
     usage: {
-      input_tokens: 0,
-      output_tokens: content.length // Rough estimate
+      input_tokens: inputTokens,
+      output_tokens: outputTokens
     }
   };
 }
@@ -169,11 +172,11 @@ export function claudeSseMessageStop(): string {
   });
 }
 
-export function claudeSseMessageDelta(): string {
+export function claudeSseMessageDelta(outputTokens = 0): string {
   return claudeSseEncode({
     type: "message_delta",
     delta: { stop_reason: "end_turn", stop_tokens: [] },
-    usage: { output_tokens: 0 }
+    usage: { output_tokens: outputTokens }
   });
 }
 

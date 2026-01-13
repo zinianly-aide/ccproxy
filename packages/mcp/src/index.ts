@@ -5,6 +5,7 @@ import { startMcpServer } from "./mcpServer";
 import { createVscodeOpenTool } from "./tools/vscodeOpen";
 import { createCmdRunTool } from "./tools/cmdRun";
 import { createLogsStreamTool } from "./tools/logsStream";
+import { createSubagentTool } from "./tools/subagentRun";
 import { startHttpControl } from "./httpControl";
 
 async function main() {
@@ -17,7 +18,8 @@ async function main() {
   const tools = [
     createVscodeOpenTool(config.repoRoot),
     createCmdRunTool(config.repoRoot, runStore),
-    createLogsStreamTool(config, runStore)
+    createLogsStreamTool(config, runStore),
+    createSubagentTool(config)
   ];
 
   startMcpServer({ tools });

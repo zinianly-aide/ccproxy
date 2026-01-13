@@ -45,6 +45,42 @@ function isIncompleteContent(content: string): boolean {
   return false;
 }
 
+function extractTextContent(content: unknown): string | null {
+  if (typeof content === "string") {
+    return content;
+  }
+
+  if (Array.isArray(content)) {
+    const textBlocks = content
+      .map((item) => {
+        if (!item || typeof item !== "object") return "";
+        const text = (item as { text?: unknown }).text;
+        return typeof text === "string" ? text : "";
+      })
+      .filter((text) => text.trim().length > 0);
+
+    if (!textBlocks.length) return null;
+    return textBlocks.join("\n");
+  }
+
+  if (content && typeof content === "object") {
+    const text = (content as { text?: unknown }).text;
+    if (typeof text === "string") return text;
+  }
+
+  return null;
+}
+
+function isEmptyContent(content: unknown): boolean {
+  if (content === null || content === undefined) return true;
+  if (typeof content === "string") return content.trim().length === 0;
+  if (Array.isArray(content)) return content.length === 0;
+  if (typeof content === "object") {
+    return Object.keys(content as Record<string, unknown>).length === 0;
+  }
+  return false;
+}
+
 /**
  * Clean incomplete messages from conversation history
  *
@@ -60,18 +96,18 @@ export function sanitizeMessages(
 
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
-    const content = typeof msg.content === "string" ? msg.content : "";
+    const contentText = extractTextContent(msg.content);
 
     // Skip empty content messages
-    if (!content) {
+    if (isEmptyContent(msg.content)) {
       warnings.push(`Message ${i + 1} (${msg.role}): Empty content, skipping`);
       continue;
     }
 
     // Check for incomplete content in assistant messages
-    if (msg.role === "assistant" && isIncompleteContent(content)) {
+    if (msg.role === "assistant" && contentText && isIncompleteContent(contentText)) {
       warnings.push(
-        `Message ${i + 1} (assistant): Incomplete content detected "${content.substring(0, 50)}...", skipping`
+        `Message ${i + 1} (assistant): Incomplete content detected "${contentText.substring(0, 50)}...", skipping`
       );
       continue;
     }
